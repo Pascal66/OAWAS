@@ -1,3 +1,4 @@
+
 #ifndef cbi
 #define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
 #endif
@@ -6,13 +7,19 @@
 #endif
 
 #define FASTADC 1
-
+//07012013
+//#define ISR 
 //#define DEBUG
+
 #include <avr/sleep.h>
+//#include <avr/wdt.h>
 
 #include <WiServer.h>
 extern "C" {
 #include <g2100.h>
+} 
+extern "C" {
+#include <spi.h>
 } 
 #define WIRELESS_MODE_INFRA  1
 #define WIRELESS_MODE_ADHOC	2
@@ -29,16 +36,16 @@ unsigned char security_type = 5;	// 0 - open; 1 - WEP; 2 - WPA; 3 - WPA2
 
 // WPA/WPA2 passphrase
 const prog_char security_passphrase[] PROGMEM = {
-  "freebox v6 passwrod"};
+  "pulle@.-astantes!-speraveris-enuntiand#@"};
 // Pre-calc
-// 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 ef 0d b4 56 2e 99 3d 3e 1a ee a2 21 8f 82 6f
+// 31 b1 e5 97 9d d6 72 dc 6f 55 a1 ca 9a 5d 33 5b 04 ef 0d b4 56 2e 99 3d 3e 1a ee a2 21 8f 82 6f
 // 4, 5 - WPA/WPA2 Precalc
 // The 32 byte precalculate WPA/WPA2 key. This can be calculated in advance to save boot time
 // http://jorisvr.nl/wpapsk.html
 
 //PP Voir g2100.c
 const prog_char security_data[] PROGMEM = {
-  0x00, 0xB1, 0xE5, 0x97, 0x9D, 0xD6, 0x72, 0xDC, 0x6F, 0x55, 0xA1, 0xCA, 0x9A, 0x5D, 0x33, 0x5B, 
+  0x31, 0xB1, 0xE5, 0x97, 0x9D, 0xD6, 0x72, 0xDC, 0x6F, 0x55, 0xA1, 0xCA, 0x9A, 0x5D, 0x33, 0x5B, 
   0x04, 0xEF, 0x0D, 0xB4, 0x56, 0x2E, 0x99, 0x3D, 0x3E, 0x1A, 0xEE, 0xA2, 0x21, 0x8F, 0x82, 0x6F,
 };  
 
@@ -72,24 +79,28 @@ void printData(char* data, int len) {
   // Print the data returned by the server
   // Note that the data is not null-terminated, may be broken up into smaller packets, and 
   // includes the HTTP header. 
-#ifdef DEBUG
   while (len-- > 0) { 
     Serial.print(*(data++));
-  } 
-#endif  
+  }   
 }
 
 int chksum_2;
 long Vcc=3293;
 char rf_data[128]; 
 
+volatile int SHORT=550, X=1900, Y=4450, Z=9450;
+static float chklast = 0;
+
 void sendstatus(void)
 { 
-  //  detachInterrupt(1); // ON NE PERTURBE PAS LE WIFI 
-  EIMSK&=~(1<<INT1);  // mask Interrupt 1
-
-    float temperature = bmp085GetTemperature(bmp085ReadUT()); //MUST be called first
+  float temperature = bmp085GetTemperature(bmp085ReadUT()); //MUST be called first
   float pressure = bmp085GetPressure(bmp085ReadUP());
+
+  //  Vcc += readVcc(); 
+  //  Vcc /=2;
+  Vcc = readVcc(); 
+
+  long AD7 = analogRead(A7); // Lit PC1 ?? (3eme a gauche en partant du bas
 
   U16 rssi = zg_get_rssi();
   float strengh = ( rssi / 2.0); // 100*rssi/200
@@ -98,6 +109,9 @@ void sendstatus(void)
   //  float t = (dht.readTemperature()/1.0/* + temperature) / 2))*/);
   float h=0.00;
   float t=temperature;
+
+  if (h+t == chklast) return;
+  chklast=h+t;
 
   char tBuffer[16]; 
   char hBuffer[16];
@@ -112,10 +126,7 @@ void sendstatus(void)
   replaceAll(bBuffer, " ","");
   replaceAll(rBuffer, " ","");
   replaceAll(rf_data, " ","");
-  Vcc += readVcc(); 
-  Vcc /=2;
 
-  long AD7 = analogRead(A7); // Lit PC1 ?? (3eme a gauche en partant du bas
   char newURL[255];
   sprintf(newURL, path, tBuffer, hBuffer, Vcc, AD7, bBuffer, rBuffer,rf_data);
 
@@ -128,10 +139,15 @@ void sendstatus(void)
   Serial.print(char(9));
 
   Serial.println(rf_data); 
-  //       Serial.print(" SHORT ");Serial.print(SHORT);
-  //       Serial.print(" X ");Serial.print(X);
-  //       Serial.print(" Y ");Serial.print(Y);
-  //       Serial.print(" Z ");Serial.print(Z); 
+
+  Serial.print(" SHORT ");
+  Serial.print(SHORT);
+  Serial.print(" X ");
+  Serial.print(X);
+  Serial.print(" Y ");
+  Serial.print(Y);
+  Serial.print(" Z ");
+  Serial.println(Z); 
   delay(50); 
 #endif 
 }
@@ -147,48 +163,19 @@ void replaceAll(char *buf_,const char *find_,const char *replace_) {
     strncpy(pos,replace_,replen);
     strcpy(pos+replen,pos+findlen);
   }
-} /*
-volatile uint16_t adcval;
- 
- ISR(ADC_vect)
- {
- adcval = ADCW;
- }
- */
+} 
 long readVcc() {
   long result;
 
   ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
   delay(2); // Wait for Vref to settle
 
-  // Set the Prescaler to 16 (16000KHz/16 = 1MHz)
-  sbi(ADCSRA,ADPS2) ;
-  cbi(ADCSRA,ADPS1) ;
-  cbi(ADCSRA,ADPS0) ;
-
   // Set ADEN in ADCSRA to enable the ADC.
   ADCSRA |= _BV(ADEN);
 
-  //Single Conversion mode must be selected 
-  //and the ADC conversion complete interrupt must be enabled
-  // ADC interrupt Enable
-  //  ADCSRA |= _BV(ADIE);
-  //Enter ADC Noise Reduction mode (or Idle mode). 
-  //The ADC will start a conversion once the CPU has been halted.
-  //  set_sleep_mode(SLEEP_MODE_ADC); sleep_mode();
-  //ADC automatically starts a conversion
-  //when the processor enters sleep mode (in noise reduction or idle
-  //mode), so you don't need to set ADSC yourself 
   ADCSRA |= _BV(ADSC); // Convert take 25 clock puis 13 clock
   while (bit_is_set(ADCSRA,ADSC)) ;
-  //  result = ADCL | ADCH<<8; // uint16_t ADCW ??
-  //result |= ADCH<<8;
-  //  result = 1126400L / result ; // Back-calculate AVcc in mV
-  result = 1126400L / ADCW ; // Back-calculate AVcc in mV 1312 00:29
-  //result = 1126400L / adcval;
-  //1.1v * 1000 * 1024
-  // ADC interrupt Disable
-  //  ADCSRA &= ~_BV(ADIE); 
+  result = 1126400L / ADCW ; 
   return result;
 }
 
@@ -216,10 +203,11 @@ int md;
 // so ...Temperature(...) must be called before ...Pressure(...).
 long b5; 
 
+// This variable is made volatile because it is changed inside an interrupt function
 volatile int ISRCount = 0; 
 volatile boolean f_timer=true;  //used to cound number of sleep cycles
-// This variable is made volatile because it is changed inside an interrupt function
-int sleep_count = 1; // Keep track of how many sleep (x+1) * 8s
+//07012013 on va essayer de dormir >21s au lieu de >7s sans deconnection
+int sleep_count = 21; // Keep track of how many sleep (x+1) * 0.5s
 // Mieux vaut dormir souvent que de dormir longtemps
 
 /* Receiver pinmap */
@@ -232,42 +220,40 @@ const byte RF_RX_SIG = 3; // don't forget the wire between this pin and D2 !
 /* ISR routines variables */
 unsigned long current_time, relative_time, last_time = 0;
 
-int bits_counter, packet_counter, __A_counter;
+int packet_counter, __A_counter;
 
 boolean last = false;
-boolean trame_triggered = false;
-
-char A[2]={ // NOMBRE DE FRONTS
-  '\0','\0'};
-byte CHAN[2]; // NXT OPTIMIZE TODO 10122012
-// byte B;
-// int SHORT=550, X=1900, Y=4450, Z=9450;
+volatile boolean trame_triggered;
 
 /** 
  * ISR RF frame decoding routine
  */
+//07012013 
+//#ifdef ISR
+//ISR(INT1_vect, ISR_NAKED) { 
+//#else
 void isr_decoding_routine(void) {
+//#endif
   current_time = micros();
   relative_time = current_time - last_time;
   last_time = current_time;
 
-  trame_triggered = false; 
-  // last = 0 ;
+  trame_triggered = false; // Serial.println(relative_time);
 
   if((relative_time>=250 && relative_time<=700) && last) {
     // Nous avons un front bas très court et la base de ABC      
     last = false; 
-    //    SHORT+=relative_time; 
-    //    SHORT/=2;
-    return;
+    SHORT+=relative_time; 
+    SHORT/=2;    
+    return ;
   } 
   if((relative_time>=1450 && relative_time<=2500) && !last) {
     // Nous avons un front haut court et la base de BC
     __A_counter++;
     last = 1; 
-    //   X+=relative_time; 
-    //   X/=2;
-    return;
+    X+=relative_time; 
+    X/=2;
+    return ;
   } 
   if((relative_time>=4000 && relative_time<=6000) && !last) {
     // Nous avons le front des données,
@@ -276,30 +262,29 @@ void isr_decoding_routine(void) {
     rf_data[packet_counter++] = '0' + __A_counter;
     rf_data[packet_counter] ='\0';
 
-    //    A[0] = '0'+__A_counter;
-    //    strcat(rf_data,A);
-    //    packet_counter++;  
-
-    chksum_2 += __A_counter;
-    //      Serial.print(A_counter);//Serial.print('A');    
-    //      Serial.print(' ');
+    chksum_2 += __A_counter; 
     __A_counter=1;
     last = 1; 
-    //   Y+=relative_time; 
-    //   Y/=2;
-    return;
+    Y+=relative_time; 
+    Y/=2;
+    return ;
   } 
   if((relative_time>=8000 && relative_time<=9900) && !last) {
     // Nous avons le front des trames (long) = 2A suivi de C
     // Il y a 9 trames 7 completes, un départ, une finale
-    if (__A_counter>=1) {
+    if (__A_counter>=1 && chksum_2==27) { 
+#ifdef DEBUG     
+      //Serial.println("TRAME ISR");
+#endif
+
       trame_triggered = true; 
-    }
+    } 
+
     __A_counter=1;
     last = 1; 
-    //    Z+=relative_time; 
-    //    Z/=2;
-    return;
+    Z+=relative_time; 
+    Z/=2;
+    return ;
   } 
   else 
   { 
@@ -308,8 +293,7 @@ void isr_decoding_routine(void) {
     __A_counter=1;
     last = 1;
     chksum_2 = 0;
-    //Serial.println(relative_time);
-    return;
+    return ;
   } 
 
 }
@@ -319,6 +303,30 @@ void isr_decoding_routine(void) {
 /* -------------------------------------------------------- */
 
 void setup() {
+  //07012013
+  delay( 50 );   // allow some time (50 ms) after powerup and sketch start, 
+  // for the Wishield Reset IC to release and come out of reset.
+
+  //pinMode(4, OUTPUT);
+  //PORTD &= ~_BV(4);//digitalWrite(4, LOW);
+
+  //07012013 
+#ifndef sleep_bod_disable
+#define sleep_bod_disable() \
+do { \
+unsigned char tempreg; \
+__asm__ __volatile__("in %[tempreg], %[mcucr]" "\n\t" \
+"ori %[tempreg], %[bods_bodse]" "\n\t" \
+"out %[mcucr], %[tempreg]" "\n\t" \
+"andi %[tempreg], %[not_bodse]" "\n\t" \
+"out %[mcucr], %[tempreg]" \
+: [tempreg] "=&d" (tempreg) \
+: [mcucr] "I" _SFR_IO_ADDR(MCUCR), \
+[bods_bodse] "i" (_BV(BODS) | _BV(BODSE)), \
+[not_bodse] "i" (~_BV(BODSE))); \
+} while (0)
+#endif
+
 #if FASTADC
   // Define various ADC prescaler
   const unsigned char PS_16 = (1 << ADPS2);
@@ -330,16 +338,13 @@ void setup() {
   // you can choose a prescaler from above.
   // PS_16, PS_32, PS_64 or PS_128
   ADCSRA |= PS_16;    // set our own prescaler to 64 
-  // set prescale to 16
-  //  sbi(ADCSRA,ADPS2) ;
-  //  cbi(ADCSRA,ADPS1) ;
-  //  cbi(ADCSRA,ADPS0) ;
+
 #endif
 
 #ifdef DEBUG
   // Serial port initialization (for output) 
   Serial.begin(115200);
-  Serial.println("PP 433 sniffer github");
+  Serial.println("PP 433 sniffer v10_NEWISR");
   // Initialize WiServer and have it use the sendMyPage function to serve pages
   //WiServer.init(sendMyPage);
   WiServer.init(NULL);
@@ -352,93 +357,89 @@ void setup() {
 
 #else
   WiServer.init(NULL);
-  WiServer.enableVerboseMode(false);
-  //  sendWEE.setReturnFunc(printData);
-  //  Serial.end();
-  UCSR0B = 0xFF; 
-  UCSR0B = 0;
-  //  UCSR0B &= ~(1<<RXEN0); 
-  //  UCSR0B &= ~(1<<TXEN0); 
-  //  UCSR0B &= ~(1<<RXCIE0); 
-  //  UCSR0B &= ~(1<<UDRIE0); 
 #endif
 
   Wire.begin();
   bmp085Calibration();
 
   watchdogOn(); // Turn on the watch dog timer.
-
-  /* Receiver pins as input, power pins as output */
   pinMode(RF_RX_SIG, INPUT);
-  //  digitalWrite(RF_RX_SIG, HIGH);
+ 
+//07012013 
+//#ifdef ISR
+//EICRA &= ~(_BV(ISC10) | _BV (ISC11));  // clear existing flags
+//EICRA |= _BV (ISC10);    // set wanted flags (change level interrupt)
+//EIMSK |= _BV (INT1);     // enable it
 
+//EICRA (External Interrupt Control Register A) would be set according to this table from the Atmega328 datasheet (page 71). 
+//That defines the exact type of interrupt you want:
+
+//0: The low level of INT0 generates an interrupt request (LOW interrupt).
+//1: Any logical change on INT0 generates an interrupt request (CHANGE interrupt).
+//2: The falling edge of INT0 generates an interrupt request (FALLING interrupt).
+//3: The rising edge of INT0 generates an interrupt request (RISING interrupt).
+
+//EIMSK (External Interrupt Mask Register) actually enables the interrupt.
+
+//EIFR = _BV (INTF1);  // clear flag for interrupt 1
+//#else
   /* low-level ISR decoding routine setup */
   attachInterrupt(1, isr_decoding_routine, CHANGE);
+//#endif  
+
 }
 
 void loop() {
+  // static char old_data[128];
+  // WiServer.server_task(); 
+  //  delay(500); // Wait for 9 trames
 
-  static char old_data[128];
+  while(!trame_triggered) { 
+    WiServer.server_task();  
+    ISRCount=sleep_count-1; // Juste 0.5s
 
-  // Process pending tasks in the WiServer queue
-  WiServer.server_task();
+    //sleepNow();
+    dodo('N');
+    //delay(10);
+  }
+  EIMSK&=~(1<<INT1);  // mask Interrupt 1
 
-  //while(!trame_triggered) { dodo(); }
+#ifdef DEBUG
+    Serial.println("TRAME LOOP"); 
+#endif   
 
-  if(trame_triggered && packet_counter>1) {
 
-    rf_data[packet_counter] ='\0';
+  rf_data[packet_counter] ='\0';
 
-    if (strcmp(old_data,rf_data)==0) {
-      rf_data[0]='\0';
-      packet_counter=0;
-      trame_triggered=false;
-      //      Serial.print("OLD ");
-      ISRCount=0; 
-      f_timer = false; 
-      dodo('O'); 
-      return;
-    }
+  sendstatus(); 
+  delay(500);
+  rf_data[0] ='\0'; 
+  // WiServer.server_task();
 
-    //    B = (new_data[packet_counter-1]+2*new_data[packet_counter-2]*new_data[packet_counter-1])%4;
-    //    int SB= new_data[packet_counter-1]-'0'+new_data[packet_counter-2]-'0';   
-    // CHAN = mod(P + 2*O*P, 4);
+  f_timer=false;
+  ISRCount = 0;
+  packet_counter=0;
+  trame_triggered=false;
 
-    if (chksum_2!=27) { // PUISQU'ON A FABRIQUE UN SEPARATEUR QUI VAUT 10 
-      //Serial.print(a);
-      rf_data[0]='\0';
-      packet_counter=0;
-      trame_triggered=false;
-      f_timer = false; 
-      dodo('C'); // Du brouillage my lord 
-      // futur use of quelques protocoles 433 pour voir...
-      return;
-    }
+  dodo('K'); 
 
-    sendstatus();
-    strcpy(old_data, rf_data); 
-    rf_data[0] ='\0'; 
-
-    f_timer=false;
-    ISRCount = 0;
-    packet_counter=0;
-    trame_triggered=false;
-  } 
-  //   delay(10); 
-  dodo('L');
-  ISRCount=0; 
-
-  // Process pending tasks in the WiServer queue
-  WiServer.server_task();
+  EIMSK|=(1<<INT1);  // unmask Interrupt 1
 }
 
 void dodo(char etat) { 
 
-  //clock_prescale_set(clock_div_2); // DOESNT WORK
+  //ZG2100_CSoff(); 
+  LEDConn_off();
+  //PIND |= _BV(4);//PORTD |= _BV(4); //digitalWrite(4, HIGH);
 
   EIMSK&=~(1<<INT0);  // mask Interrupt 0
   EIMSK&=~(1<<INT1);  // mask Interrupt 1
-  //#define ZG2100_ISR_DISABLE() detachInterrupt(0);
+
+    //disable timer2
+  // Remove the clock source to shutdown Timer2
+  TCCR2B &= ~(1 << CS22);
+  TCCR2B &= ~(1 << CS21);
+  TCCR2B &= ~(1 << CS20);
 
   while(!f_timer) {
 #ifdef DEBUG
@@ -447,13 +448,94 @@ void dodo(char etat) {
 #endif    
     sleepNow(); // ATmega328 goes to sleep for about 8 seconds and continues to execute code when it wakes up
 
-    // clock_prescale_set(clock_div_1); // DOESNT WORK
   } 
+  // enable Timer_2
+  TCCR2B |= (1 << CS22);
+  TCCR2B |= (1 << CS21);
+  TCCR2B |= (1 << CS20);
 
   EIMSK|=(1<<INT0);  // unmask Interrupt 0
   EIMSK|=(1<<INT1);  // unmask Interrupt 1
-  //#define ZG2100_ISR_ENABLE()	attachInterrupt(0, zg_isr, LOW); 
-  //  attachInterrupt(1, isr_decoding_routine, CHANGE);
+
+    //PIND |= _BV(4); //PORTD &= ~_BV(4);//digitalWrite(4, LOW);
+  //ZG2100_CSon(); 
+  LEDConn_on();
+}
+
+
+void sleepNow()   
+{  
+  byte spi_save = SPCR;
+  //  SPCR = 0;
+
+  //  clock_prescale_set(value);
+  cbi(ADCSRA,ADEN); //  ADCSRA |= (0<<ADEN); // Switch Analog to Digital converter OFF
+
+  //  enable_low_power(true);
+ // Important note! You must use the PRR after setting ADCSRA to zero, 
+ // otherwise the ADC is "frozen" in an active state.
+  // turn off various modules
+  //  PRR = 0xFF; 
+  PRR = (1<<PRTWI) | (1<<PRTIM0) | (1<<PRTIM1) | (1<<PRTIM2) | (1<<PRSPI) | (1<<PRADC) | (1<<PRUSART0);
+  //Bit 7 - PRTWI: Power Reduction TWI
+  //Bit 6 - PRTIM2: Power Reduction Timer/Counter2
+  //Bit 5 - PRTIM0: Power Reduction Timer/Counter0
+  //Bit 4 - Res: Reserved bit
+  //Bit 3 - PRTIM1: Power Reduction Timer/Counter1
+  //Bit 2 - PRSPI: Power Reduction Serial Peripheral Interface
+  //Bit 1 - PRUSART0: Power Reduction USART0
+  //Bit 0 - PRADC: Power Reduction ADC
+
+
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN); // Set sleep mode.
+  sleep_enable(); // Enable sleep mode.
+
+  //07012013 
+  sleep_bod_disable();
+  // ou
+  // turn off brown-out enable in software
+  // MCUCR = _BV (BODS) | _BV (BODSE);
+  // MCUCR = _BV (BODS); 
+
+  sleep_cpu(); // Enter sleep mode.
+  // After waking from watchdog interrupt the code continues
+  // to execute from this point
+
+  sleep_disable(); // Disable sleep mode after waking.
+
+  // turn on various modules
+  PRR = 0x00;
+
+  sbi(ADCSRA,ADEN); //  ADCSRA |= (1<<ADEN); // Switch Analog to Digital converter ON
+
+    //  SPCR = spi_save;
+}
+
+void watchdogOn() {
+  //Watchdog Timer Prescale Select
+  //   WDP3   WDP2   WDP1     WDP0         Number of WDT     Typical Time-out at
+
+  //   0         0      0        0             2K (2048) cycles       16 ms
+  //   0         0      0        1             4K (4096) cycles       32 ms
+  //   0         0      1        0             8K (8192) cycles       64 ms
+  //   0         0      1        1            16K (16384) cycles    0.125 s
+  //   0         1      0        0            32K (32768) cycles    0.25 s
+  //   0         1      0        1            64K (65536) cycles    0.5 s
+  //   0         1      1        0            128K (131072) cycles 1.0 s
+  //   0         1      1        1            256K (262144) cycles 2.0 s
+  //   1         0      0        0            512K (524288) cycles 4.0 s
+  //   1         0      0        1            1024K (1048576) cycles 8.0 s
+
+  MCUSR &= ~(1<<WDRF);
+  WDTCSR  = (1<<WDCE | 1<<WDE);     // watchdog change enable
+  //  WDTCSR  = (1<<WDIE) | (1<<WDP3) | (1<<WDP0); // set  prescaler to 8 second
+  // WDTCSR  = _BV(WDIE) | _BV(WDP0) | _BV(WDP1) | _BV(WDP2);     // enable WD 2 sec
+  WDTCSR  = _BV(WDIE) | _BV(WDP0) | _BV(WDP2);     // enable WD 0.5 sec
+}
+
+ISR(WDT_vect) { 
+  (ISRCount++ >= sleep_count)?f_timer=true:f_timer=false; 
+  // keep track of how many sleep cycles have been completed.
 }
 
 // Stores all of the bmp085's calibration values into global variables
@@ -631,79 +713,3 @@ int readRegister(int deviceAddress, byte address){
   return v;
 }
 
-float calcAltitude(float pressure){
-
-  float A = pressure/101325;
-  float B = 1/5.25588;
-  float C = pow(A,B);
-  C = 1 - C;
-  C = C /0.0000225577;
-
-  return C;
-}
-
-void sleepNow()   
-{
-  //  clock_prescale_set(value);
-  cbi(ADCSRA,ADEN); //  ADCSRA |= (0<<ADEN); // Switch Analog to Digital converter OFF
-
-  PRR = (1<<PRTWI) | (1<<PRTIM0) | (1<<PRTIM1) | (1<<PRTIM2) | (1<<PRSPI) | (1<<PRADC) | (1<<PRUSART0);
-  //Bit 7 - PRTWI: Power Reduction TWI
-  //Bit 6 - PRTIM2: Power Reduction Timer/Counter2
-  //Bit 5 - PRTIM0: Power Reduction Timer/Counter0
-  //Bit 4 - Res: Reserved bit
-  //Bit 3 - PRTIM1: Power Reduction Timer/Counter1
-  //Bit 2 - PRSPI: Power Reduction Serial Peripheral Interface
-  //Bit 1 - PRUSART0: Power Reduction USART0
-  //Bit 0 - PRADC: Power Reduction ADC
-
-  //v3
-  MCUCR |= (1<<BODS) | (1<<BODSE);
-  MCUCR &= ~(1<<BODSE) | (1<<BODS);   
-
-  set_sleep_mode(SLEEP_MODE_PWR_DOWN); // Set sleep mode.
-
-  sleep_enable(); // Enable sleep mode.
-
-  sleep_mode(); // Enter sleep mode.
-  // After waking from watchdog interrupt the code continues
-  // to execute from this point
-
-  sleep_disable(); // Disable sleep mode after waking.
-
-  // turn on various modules
-  PRR = 0x00; 
-  sbi(ADCSRA,ADEN); //  ADCSRA |= (1<<ADEN); // Switch Analog to Digital converter ON
-
-    //  enable_low_power(false);
-}
-
-void watchdogOn() {
-
-  MCUSR &= ~(1<<WDRF);
-  //  wdt_enable(WDTO_8S);
-  WDTCSR  = (1<<WDCE | 1<<WDE);     // watchdog change enable
-  WDTCSR  = (1<<WDIE) | (1<<WDP3)|(0<<WDP2) | (0<<WDP1) | (1<<WDP0); // set  prescaler to 8 second
-
-  // Sleep mode
-  // CPU Sleep Modes
-  // SM2 SM1 SM0 Sleep Mode
-  // 0    0  0 Idle
-  // 0    0  1 ADC Noise Reduction
-  // 0    1  0 Power-down
-  // 0    1  1 Power-save
-  // 1    0  0 Reserved
-  // 1    0  1 Reserved
-  // 1    1  0 Standby(1)
-  // 1    1  1 External Standby(1)
-  cbi( SMCR,SE );      // sleep enable, power down mode sbi 1 cbi 0
-  cbi( SMCR,SM0 );     // power down mode
-  sbi( SMCR,SM1 );     // power down mode
-  cbi( SMCR,SM2 );     // power down mode
-}
-
-ISR(WDT_vect) { 
-  (ISRCount++ >= sleep_count)?f_timer=true:f_timer=false; 
-  // keep track of how many sleep cycles
-  // have been completed.
-}
