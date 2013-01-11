@@ -1,4 +1,3 @@
-
 #ifndef cbi
 #define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
 #endif
@@ -31,12 +30,12 @@ unsigned char gateway_ip[] = {
 unsigned char subnet_mask[] = {
   255,255,255,0};	// subnet mask for the local network
 const prog_char ssid[] PROGMEM = {
-  "Freebox-550CD1"};		// max 32 bytes
+  "Freebox-"};		// max 32 bytes
 unsigned char security_type = 5;	// 0 - open; 1 - WEP; 2 - WPA; 3 - WPA2
 
 // WPA/WPA2 passphrase
 const prog_char security_passphrase[] PROGMEM = {
-  "pulle@.-astantes!-speraveris-enuntiand#@"};
+  "@"};
 // Pre-calc
 // 31 b1 e5 97 9d d6 72 dc 6f 55 a1 ca 9a 5d 33 5b 04 ef 0d b4 56 2e 99 3d 3e 1a ee a2 21 8f 82 6f
 // 4, 5 - WPA/WPA2 Precalc
