@@ -1,4 +1,4 @@
-AOAWAS
+OAWAS
 ======
 
-Another Optimized Arduino Wireless Autonom Sensors
+Optimized Arduino Wireless Autonom Sensors
